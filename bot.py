@@ -4,6 +4,7 @@ import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
 
 # === ТОКЕН из переменной окружения ===
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -31,6 +32,10 @@ user_walks = {}
 user_walk_index = {}
 user_temp = {}
 
+# --- Функция получения упоминания пользователя ---
+def get_user_mention(user_id):
+    return f"[пользователь](tg://user?id={user_id})"
+
 # --- Правила ---
 @dp.message(lambda m: m.text == "📖 Правила")
 async def show_rules(message: types.Message):
@@ -56,10 +61,6 @@ async def show_help(message: types.Message):
         "Мы ответим в ближайшее время.",
         parse_mode="Markdown"
     )
-
-# --- Вспомогательная функция: получить имя пользователя ---
-def get_user_mention(user_id):
-    return f"[пользователь](tg://user?id={user_id})"
 
 # --- Создание прогулки ---
 @dp.message(lambda m: m.text == "🚶‍♀️ Создать прогулку")
@@ -107,7 +108,21 @@ async def create_walk_collect(message: types.Message):
         del user_temp[user_id]
         await message.answer("✅ Прогулка создана!", reply_markup=main_kb)
 
-# --- Смотреть прогулки ---
+# --- Команда /start ---
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    await message.answer(
+        "👋 Привет! Я — «Рядом».\n"
+        "Я здесь, чтобы прогулки стали интереснее, а компании находились проще.\n\n"
+        "🚶‍♀️ Создать прогулку — если хочешь позвать других\n"
+        "📅 Смотреть прогулки — если ищешь, куда пойти\n"
+        "👤 Мои прогулки — где ты участвуешь\n"
+        "📖 Правила — безопасность и этика в нашем сообществе (рекомендую прочитать перед первой прогулкой)\n\n"
+        "Давай знакомиться?",
+        reply_markup=main_kb
+    )
+
+# --- Смотреть прогулки (по одной, с кнопкой Дальше) ---
 @dp.message(lambda m: m.text == "📅 Смотреть прогулки")
 async def show_walks_start(message: types.Message):
     user_id = message.from_user.id
@@ -117,7 +132,7 @@ async def show_walks_start(message: types.Message):
         if max_members == 0 or len(walk["members"]) < max_members:
             available_walks.append(walk)
     if not available_walks:
-        await message.answer("Пока нет доступных прогулок.")
+        await message.answer("Пока нет доступных прогулок. Создайте первую!")
         return
     user_walk_index[user_id] = {"walks": available_walks, "index": 0}
     await show_current_walk(message, user_id)
@@ -244,19 +259,7 @@ async def join_walk(callback: types.CallbackQuery):
     if walk_id not in user_walks[user_id]:
         user_walks[user_id].append(walk_id)
     await callback.answer("✅ Вы записаны!")
-    current_members = len(walk["members"])
-    max_members = int(walk["max"]) if walk["max"].isdigit() else 0
-    members_text = f"{current_members}"
-    if max_members > 0:
-        members_text += f" / {max_members}"
-    new_text = (
-        f"📍 *{walk['name']}*\n"
-        f"🗓 Когда: {walk['datetime']}\n"
-        f"📍 Где: {walk['place']}\n"
-        f"👥 Участников: {members_text}\n\n"
-        f"✅ Вы записаны!"
-    )
-    await callback.message.edit_text(new_text, parse_mode="Markdown", reply_markup=None)
+    await callback.message.edit_text(callback.message.text + "\n\n✅ Вы идёте!", reply_markup=None)
 
 # --- Мои прогулки ---
 @dp.message(lambda m: m.text == "👤 Мои прогулки")
@@ -309,8 +312,21 @@ async def delete_walk(callback: types.CallbackQuery):
     await callback.answer("Прогулка удалена!")
     await callback.message.edit_text(callback.message.text + "\n\n❌ Удалено", reply_markup=None)
 
+# === Фейковый веб-сервер для Render ===
+async def health_check(request):
+    return web.Response(text="Bot is running")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+
 # --- Запуск ---
 async def main():
+    asyncio.create_task(start_web_server())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

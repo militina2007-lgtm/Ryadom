@@ -1,10 +1,14 @@
 import asyncio
 import logging
 import os
+import re
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # === ТОКЕН из переменной окружения ===
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -14,6 +18,128 @@ if not TOKEN:
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# === Google Sheets подключение ===
+SHEET_ID = "1Q1BQaCoBnMZSPWtM-utnrmVoD0qOsHOO7S4ilhL03D8"  # Замените на ваш ID
+
+def get_sheet():
+    creds_file = "/etc/secrets/credentials.json"
+    if not os.path.exists(creds_file):
+        logging.warning("Файл credentials.json не найден в /etc/secrets/")
+        return None
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SHEET_ID).sheet1
+
+# Загружаем прогулки из таблицы при старте
+walks = []
+user_walks = {}
+sheet = get_sheet()
+
+def load_walks_from_sheet():
+    global walks, user_walks
+    if not sheet:
+        return
+    rows = sheet.get_all_values()
+    if len(rows) <= 1:
+        walks = []
+        user_walks = {}
+        return
+    walks = []
+    user_walks = {}
+    for row in rows[1:]:  # пропускаем заголовок
+        if not row or not row[0]:
+            continue
+        walk = {
+            "id": int(row[0]),
+            "name": row[1],
+            "place": row[2],
+            "datetime": row[3],
+            "description": row[4],
+            "max": row[5],
+            "creator": int(row[6]),
+            "members": list(map(int, row[7].split(","))) if row[7] else []
+        }
+        walks.append(walk)
+        # Заполняем user_walks для быстрого доступа
+        for uid in walk["members"]:
+            if uid not in user_walks:
+                user_walks[uid] = []
+            if walk["id"] not in user_walks[uid]:
+                user_walks[uid].append(walk["id"])
+
+def save_walk_to_sheet(walk):
+    if not sheet:
+        return
+    # Проверяем, есть ли уже такая прогулка
+    rows = sheet.get_all_values()
+    for i, row in enumerate(rows[1:], start=2):
+        if row and row[0] == str(walk["id"]):
+            # Обновляем существующую
+            sheet.update(f"A{i}:H{i}", [[walk["id"], walk["name"], walk["place"], walk["datetime"],
+                                         walk["description"], walk["max"], walk["creator"],
+                                         ",".join(map(str, walk["members"]))]])
+            return
+    # Иначе добавляем новую
+    sheet.append_row([walk["id"], walk["name"], walk["place"], walk["datetime"],
+                      walk["description"], walk["max"], walk["creator"],
+                      ",".join(map(str, walk["members"]))])
+
+def delete_walk_from_sheet(walk_id):
+    if not sheet:
+        return
+    rows = sheet.get_all_values()
+    for i, row in enumerate(rows[1:], start=2):
+        if row and row[0] == str(walk_id):
+            sheet.delete_rows(i)
+            return
+
+# Загружаем данные при старте
+load_walks_from_sheet()
+
+# --- Функция парсинга даты ---
+def parse_datetime(date_string):
+    pattern = r'^(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря),\s+(\d{1,2}):(\d{2})$'
+    match = re.match(pattern, date_string.strip())
+    if not match:
+        return None
+    day = int(match.group(1))
+    month_name = match.group(2)
+    hour = int(match.group(3))
+    minute = int(match.group(4))
+    month_map = {
+        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12
+    }
+    month = month_map.get(month_name.lower())
+    if not month:
+        return None
+    try:
+        current_year = datetime.now().year
+        dt = datetime(current_year, month, day, hour, minute)
+        return dt
+    except ValueError:
+        return None
+
+def is_expired(datetime_str):
+    dt = parse_datetime(datetime_str)
+    if dt is None:
+        return False
+    return dt < datetime.now()
+
+def clean_expired_walks():
+    global walks, user_walks
+    expired_ids = []
+    for walk in walks:
+        if is_expired(walk["datetime"]):
+            expired_ids.append(walk["id"])
+    if expired_ids:
+        for wid in expired_ids:
+            delete_walk_from_sheet(wid)
+        walks = [walk for walk in walks if walk["id"] not in expired_ids]
+        for uid in user_walks:
+            user_walks[uid] = [wid for wid in user_walks[uid] if wid not in expired_ids]
 
 # --- Главное меню ---
 main_kb = ReplyKeyboardMarkup(
@@ -26,13 +152,9 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# --- Хранилище ---
-walks = []
-user_walks = {}
 user_walk_index = {}
 user_temp = {}
 
-# --- Функция получения упоминания пользователя ---
 def get_user_mention(user_id):
     return f"[пользователь](tg://user?id={user_id})"
 
@@ -81,27 +203,64 @@ async def create_walk_collect(message: types.Message):
     if step == "name":
         state["name"] = message.text
         state["step"] = "place"
-        await message.answer("📍 Напишите место сбора:")
+        await message.answer(
+            "📍 Отлично!\n\n"
+            "Где встретимся? Напишите конкретное место, чтобы всем было легко найти друг друга.\n\n"
+            "Например: «У центрального входа в парк Горького, у фонтана» или «Кофейня \"Кофе и точка\", Пушкина 10»\n\n"
+            "➤ Укажите место сбора"
+        )
     elif step == "place":
         state["place"] = message.text
         state["step"] = "datetime"
-        await message.answer("🕓 Напишите дату и время в формате: 15 мая, 18:30")
+        await message.answer(
+            "🕓 Теперь — когда гуляем?\n\n"
+            "Напишите дату и время в правильном формате.\n\n"
+            "Например:\n"
+            "• 20 мая, 15:00\n\n"
+            "➤ Укажите дату и время"
+        )
     elif step == "datetime":
+        if parse_datetime(message.text) is None:
+            await message.answer("❌ Неверный формат! Напишите: 15 мая, 18:30")
+            return
         state["datetime"] = message.text
+        state["step"] = "description"
+        await message.answer(
+            "📝 Добавьте пару слов о прогулке (необязательно, но приятно).\n\n"
+            "Например: «Забредём в три новые кофейни, возьмите с собой хорошее настроение 🐶 Можно с собаками»\n\n"
+            "➤ Напишите описание или нажмите «Пропустить»",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⏩ Пропустить")]],
+                resize_keyboard=True
+            )
+        )
+    elif step == "description":
+        if message.text != "⏩ Пропустить":
+            state["description"] = message.text
+        else:
+            state["description"] = ""
         state["step"] = "max_members"
-        await message.answer("👥 Максимум участников (0 — безлимит):")
+        await message.answer(
+            "👥 Сколько человек может пойти?\n\n"
+            "• 0 — безлимит\n"
+            "• Число — например, 5\n\n"
+            "➤ Укажите максимум участников",
+            reply_markup=main_kb
+        )
     elif step == "max_members":
         state["max"] = message.text
         new_walk = {
-            "id": len(walks) + 1,
+            "id": len(walks) + 1 if walks else 1,
             "name": state["name"],
             "place": state["place"],
             "datetime": state["datetime"],
+            "description": state.get("description", ""),
             "max": state["max"],
             "creator": user_id,
             "members": [user_id]
         }
         walks.append(new_walk)
+        save_walk_to_sheet(new_walk)
         if user_id not in user_walks:
             user_walks[user_id] = []
         user_walks[user_id].append(new_walk["id"])
@@ -111,6 +270,7 @@ async def create_walk_collect(message: types.Message):
 # --- Команда /start ---
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    clean_expired_walks()
     await message.answer(
         "👋 Привет! Я — «Рядом».\n"
         "Я здесь, чтобы прогулки стали интереснее, а компании находились проще.\n\n"
@@ -122,9 +282,10 @@ async def start(message: types.Message):
         reply_markup=main_kb
     )
 
-# --- Смотреть прогулки (по одной, с кнопкой Дальше) ---
+# --- Смотреть прогулки ---
 @dp.message(lambda m: m.text == "📅 Смотреть прогулки")
 async def show_walks_start(message: types.Message):
+    clean_expired_walks()
     user_id = message.from_user.id
     available_walks = []
     for walk in walks:
@@ -159,6 +320,8 @@ async def show_current_walk(message: types.Message, user_id: int):
         f"📍 Где: {walk['place']}\n"
         f"👥 Участников: {members_text}"
     )
+    if walk.get("description"):
+        text += f"\n📝 *Описание:* {walk['description']}"
     keyboard_buttons = [
         [InlineKeyboardButton(text="✅ Присоединиться", callback_data=f"join_{walk['id']}")],
         [InlineKeyboardButton(text="👥 Участники", callback_data=f"members_{walk['id']}")],
@@ -202,14 +365,12 @@ async def show_members(callback: types.CallbackQuery):
     if not walk:
         await callback.answer("Прогулка не найдена!")
         return
-
     creator_username = None
     try:
         creator_chat = await bot.get_chat(walk["creator"])
         creator_username = "@" + creator_chat.username if creator_chat.username else get_user_mention(walk["creator"])
     except:
         creator_username = get_user_mention(walk["creator"])
-
     members_list = []
     for uid in walk["members"]:
         if uid == walk["creator"]:
@@ -220,7 +381,6 @@ async def show_members(callback: types.CallbackQuery):
             members_list.append(username)
         except:
             members_list.append(get_user_mention(uid))
-
     members_text = "\n".join(members_list) if members_list else "Пока никого"
     text = (
         f"👥 *Участники прогулки*\n\n"
@@ -254,6 +414,7 @@ async def join_walk(callback: types.CallbackQuery):
         await callback.answer("❌ Мест больше нет!")
         return
     walk["members"].append(user_id)
+    save_walk_to_sheet(walk)  # Обновляем в таблице
     if user_id not in user_walks:
         user_walks[user_id] = []
     if walk_id not in user_walks[user_id]:
@@ -264,6 +425,7 @@ async def join_walk(callback: types.CallbackQuery):
 # --- Мои прогулки ---
 @dp.message(lambda m: m.text == "👤 Мои прогулки")
 async def my_walks(message: types.Message):
+    clean_expired_walks()
     user_id = message.from_user.id
     my_walks_list = [walk for walk in walks if user_id in walk["members"] or walk["creator"] == user_id]
     if not my_walks_list:
@@ -282,6 +444,8 @@ async def my_walks(message: types.Message):
             f"📍 Где: {walk['place']}\n"
             f"👥 Участников: {members_text}"
         )
+        if walk.get("description"):
+            full_text += f"\n📝 *Описание:* {walk['description']}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👥 Участники", callback_data=f"members_{walk['id']}")]
         ])
@@ -306,6 +470,7 @@ async def delete_walk(callback: types.CallbackQuery):
         await callback.answer("Не ваша прогулка!")
         return
     walks[:] = [walk for walk in walks if walk["id"] != walk_id]
+    delete_walk_from_sheet(walk_id)
     for uid in user_walks:
         if walk_id in user_walks[uid]:
             user_walks[uid].remove(walk_id)
@@ -327,6 +492,7 @@ async def start_web_server():
 # --- Запуск ---
 async def main():
     asyncio.create_task(start_web_server())
+    clean_expired_walks()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

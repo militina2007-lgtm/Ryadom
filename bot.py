@@ -489,6 +489,17 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
+@dp.message()
+async def catch_all(message: types.Message):
+    text = message.text
+    if text in ["📖 Правила", "Правила"]:
+        await show_rules(message)
+    elif text in ["🆘 Помощь", "Помощь"]:
+        await show_help(message)
+    else:
+        await message.answer("Используйте кнопки меню 👇", reply_markup=main_kb)
+
+
 # --- Запуск ---
 async def main():
     asyncio.create_task(start_web_server())

@@ -175,7 +175,6 @@ async def start(message: types.Message):
         "🌿 Хороших прогулок!\n\n"
         "Давай знакомиться?",
         reply_markup=main_kb,
-        parse_mode="Markdown"
     )
 
 # --- Создание прогулки ---

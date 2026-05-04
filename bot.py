@@ -59,7 +59,8 @@ def load_walks_from_sheet():
             "description": row[4],
             "max": row[5],
             "creator": int(row[6]),
-            "members": list(map(int, row[7].split(","))) if row[7] else []
+            "creator_nick": row[7],
+            "members": list(map(int, row[8].split(","))) if row[8] else []
         }
         walks.append(walk)
         for uid in walk["members"]:
@@ -74,13 +75,13 @@ def save_walk_to_sheet(walk):
     rows = sheet.get_all_values()
     for i, row in enumerate(rows[1:], start=2):
         if row and row[0] == str(walk["id"]):
-            sheet.update(f"A{i}:H{i}", [[walk["id"], walk["name"], walk["place"], walk["datetime"],
+            sheet.update(f"A{i}:I{i}", [[walk["id"], walk["name"], walk["place"], walk["datetime"],
                                          walk["description"], walk["max"], walk["creator"],
-                                         ",".join(map(str, walk["members"]))]])
+                                         walk["creator_nick"], ",".join(map(str, walk["members"]))]])
             return
     sheet.append_row([walk["id"], walk["name"], walk["place"], walk["datetime"],
                       walk["description"], walk["max"], walk["creator"],
-                      ",".join(map(str, walk["members"]))])
+                      walk["creator_nick"], ",".join(map(str, walk["members"]))])
 
 def delete_walk_from_sheet(walk_id):
     if not sheet:
@@ -137,7 +138,7 @@ def clean_expired_walks():
         for uid in user_walks:
             user_walks[uid] = [wid for wid in user_walks[uid] if wid not in expired_ids]
 
-# --- Главное меню ---
+# --- Главное меню (без Правил и Помощи) ---
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚶‍♀️ Создать прогулку")],
@@ -153,40 +154,14 @@ user_temp = {}
 def get_user_mention(user_id):
     return f"[пользователь](tg://user?id={user_id})"
 
-# --- Правила ---
-@dp.message(lambda m: m.text == "Правила")
-async def show_rules(message: types.Message):
-    await message.answer(
-        "📌 *Правила сообщества «Рядом»*\n\n"
-        "1. Будьте вежливы друг с другом.\n"
-        "2. Не опаздывайте без предупреждения.\n"
-        "3. Если не можете прийти — предупредите организатора.\n"
-        "4. О конфликтах пишите в поддержку: @ryadom_poisk_support_bot\n"
-        "5. Соблюдайте личные границы.\n"
-        "6. Запрещена реклама, алкоголь, наркотики.\n\n"
-        "🌿 Хороших прогулок!",
-        parse_mode="Markdown"
-    )
-
-# --- Помощь ---
-@dp.message(lambda m: m.text == "Помощь")
-async def show_help(message: types.Message):
-    await message.answer(
-        "🆘 *Если у вас возник вопрос*\n\n"
-        "Напишите в поддержку:\n"
-        "@ryadom_poisk_support_bot\n\n"
-        "Мы ответим в ближайшее время.",
-        parse_mode="Markdown"
-    )
-
-# --- Создание прогулки ---
+# --- Создание прогулки (с ником создателя) ---
 @dp.message(lambda m: m.text == "🚶‍♀️ Создать прогулку")
 async def create_walk_start(message: types.Message):
-    user_temp[message.from_user.id] = {"step": "name"}
+    user_temp[message.from_user.id] = {"step": "nick"}
     await message.answer(
         "🚶 Давайте создадим прогулку!\n\n"
-        "Придумайте название (короткое и понятное).\n\n"
-        "➤ Напишите название прогулки"
+        "Сначала укажите ваш Telegram-ник, чтобы участники могли с вами связаться.\n\n"
+        "➤ Напишите ваш ник в формате @username"
     )
 
 @dp.message(lambda m: m.from_user.id in user_temp)
@@ -195,7 +170,19 @@ async def create_walk_collect(message: types.Message):
     state = user_temp[user_id]
     step = state.get("step")
 
-    if step == "name":
+    if step == "nick":
+        if not message.text.startswith("@"):
+            await message.answer("❌ Ник должен начинаться с @\n\n➤ Напишите ещё раз, например: @yourname")
+            return
+        state["creator_nick"] = message.text
+        state["step"] = "name"
+        await message.answer(
+            "📍 Отлично!\n\n"
+            "Теперь придумайте название прогулки (короткое и понятное).\n\n"
+            "Например: «Кофейный забег в центре» или «Медленный вечер в парке»\n\n"
+            "➤ Напишите название прогулки"
+        )
+    elif step == "name":
         state["name"] = message.text
         state["step"] = "place"
         await message.answer(
@@ -252,6 +239,7 @@ async def create_walk_collect(message: types.Message):
             "description": state.get("description", ""),
             "max": state["max"],
             "creator": user_id,
+            "creator_nick": state["creator_nick"],
             "members": [user_id]
         }
         walks.append(new_walk)
@@ -260,7 +248,12 @@ async def create_walk_collect(message: types.Message):
             user_walks[user_id] = []
         user_walks[user_id].append(new_walk["id"])
         del user_temp[user_id]
-        await message.answer("✅ Прогулка создана!", reply_markup=main_kb)
+        await message.answer(
+            "✅ Прогулка создана!\n\n"
+            "Теперь её увидят другие участники. Не забывайте отвечать в Telegram.\n\n"
+            "➤ Удачных вам встреч! 🌿",
+            reply_markup=main_kb
+        )
 
 # --- Команда /start ---
 @dp.message(Command("start"))
@@ -271,8 +264,7 @@ async def start(message: types.Message):
         "Я здесь, чтобы прогулки стали интереснее, а компании находились проще.\n\n"
         "🚶‍♀️ Создать прогулку — если хочешь позвать других\n"
         "📅 Смотреть прогулки — если ищешь, куда пойти\n"
-        "👤 Мои прогулки — где ты участвуешь\n"
-        "📖 Правила — безопасность и этика в нашем сообществе (рекомендую прочитать перед первой прогулкой)\n\n"
+        "👤 Мои прогулки — где ты участвуешь\n\n"
         "Давай знакомиться?",
         reply_markup=main_kb
     )
@@ -317,12 +309,14 @@ async def show_current_walk(message: types.Message, user_id: int):
     )
     if walk.get("description"):
         text += f"\n📝 *Описание:* {walk['description']}"
+    text += f"\n\n👑 *Создатель:* {walk['creator_nick']}"
+    
     keyboard_buttons = [
         [InlineKeyboardButton(text="✅ Присоединиться", callback_data=f"join_{walk['id']}")],
         [InlineKeyboardButton(text="⏩ Дальше", callback_data="next_walk")]
     ]
     if current_idx + 1 >= len(walks_list):
-        keyboard_buttons[2] = [InlineKeyboardButton(text="🏁 Завершить", callback_data="end_walks")]
+        keyboard_buttons[1] = [InlineKeyboardButton(text="🏁 Завершить", callback_data="end_walks")]
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -347,44 +341,7 @@ async def end_walks(callback: types.CallbackQuery):
     await callback.message.edit_text("🏁 Просмотр прогулок завершён.")
     await callback.answer()
 
-# --- Просмотр участников ---
-@dp.callback_query(lambda c: c.data.startswith("members_"))
-async def show_members(callback: types.CallbackQuery):
-    walk_id = int(callback.data.split("_")[1])
-    walk = None
-    for w in walks:
-        if w["id"] == walk_id:
-            walk = w
-            break
-    if not walk:
-        await callback.answer("Прогулка не найдена!")
-        return
-    creator_username = None
-    try:
-        creator_chat = await bot.get_chat(walk["creator"])
-        creator_username = "@" + creator_chat.username if creator_chat.username else get_user_mention(walk["creator"])
-    except:
-        creator_username = get_user_mention(walk["creator"])
-    members_list = []
-    for uid in walk["members"]:
-        if uid == walk["creator"]:
-            continue
-        try:
-            chat = await bot.get_chat(uid)
-            username = "@" + chat.username if chat.username else get_user_mention(uid)
-            members_list.append(username)
-        except:
-            members_list.append(get_user_mention(uid))
-    members_text = "\n".join(members_list) if members_list else "Пока никого"
-    text = (
-        f"👥 *Участники прогулки*\n\n"
-        f"👑 *Создатель:* {creator_username}\n\n"
-        f"📋 *Записались:*\n{members_text}"
-    )
-    await callback.message.answer(text, parse_mode="Markdown")
-    await callback.answer()
-
-# --- Присоединиться ---
+# --- Присоединиться (с уведомлением о создателе) ---
 @dp.callback_query(lambda c: c.data.startswith("join_"))
 async def join_walk(callback: types.CallbackQuery):
     walk_id = int(callback.data.split("_")[1])
@@ -398,10 +355,10 @@ async def join_walk(callback: types.CallbackQuery):
         await callback.answer("Прогулка не найдена!")
         return
     if walk["creator"] == user_id:
-        await callback.answer("❌ Вы создатель!")
+        await callback.answer("❌ Вы создатель этой прогулки!")
         return
     if user_id in walk["members"]:
-        await callback.answer("❌ Вы уже записаны!")
+        await callback.answer("❌ Вы уже записаны на эту прогулку!")
         return
     max_members = int(walk["max"]) if walk["max"].isdigit() else 0
     if max_members > 0 and len(walk["members"]) >= max_members:
@@ -413,8 +370,20 @@ async def join_walk(callback: types.CallbackQuery):
         user_walks[user_id] = []
     if walk_id not in user_walks[user_id]:
         user_walks[user_id].append(walk_id)
-    await callback.answer("✅ Вы записаны!")
-    await callback.message.edit_text(callback.message.text + "\n\n✅ Вы идёте!", reply_markup=None)
+    
+    await callback.answer("✅ Вы записаны на прогулку!")
+    
+    # Отправляем сообщение с ником создателя
+    await callback.message.answer(
+        f"✅ Вы участвуете в прогулке «{walk['name']}»!\n\n"
+        f"📩 Свяжитесь с создателем: {walk['creator_nick']}\n\n"
+        "Уточните детали, договоритесь о встрече. Хорошей прогулки! 🌿"
+    )
+    
+    await callback.message.edit_text(
+        callback.message.text + "\n\n✅ Вы записаны!",
+        reply_markup=None
+    )
 
 # --- Мои прогулки ---
 @dp.message(lambda m: m.text == "👤 Мои прогулки")
@@ -440,12 +409,12 @@ async def my_walks(message: types.Message):
         )
         if walk.get("description"):
             full_text += f"\n📝 *Описание:* {walk['description']}"
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👥 Участники", callback_data=f"members_{walk['id']}")]
-        ])
+        full_text += f"\n\n👑 *Создатель:* {walk['creator_nick']}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
         if walk["creator"] == user_id:
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_{walk['id']}")])
-        await message.answer(full_text, parse_mode="Markdown", reply_markup=keyboard)
+        await message.answer(full_text, parse_mode="Markdown", reply_markup=keyboard if keyboard.inline_keyboard else None)
 
 # --- Удалить прогулку ---
 @dp.callback_query(lambda c: c.data.startswith("delete_"))
@@ -483,32 +452,11 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
-# --- Универсальный обработчик (ЛОВИТ ВСЕ КНОПКИ) ---
+# --- Универсальный обработчик для игнора прочего ---
 @dp.message()
 async def catch_all(message: types.Message):
-    text = message.text
-    if text in ["📖 Правила", "Правила"]:
-        await message.answer(
-            "📌 *Правила сообщества «Рядом»*\n\n"
-            "1. Будьте вежливы друг с другом.\n"
-            "2. Не опаздывайте без предупреждения.\n"
-            "3. Если не можете прийти — предупредите организатора.\n"
-            "4. О конфликтах пишите в поддержку: @ryadom_poisk_support_bot\n"
-            "5. Соблюдайте личные границы.\n"
-            "6. Запрещена реклама, алкоголь, наркотики.\n\n"
-            "🌿 Хороших прогулок!",
-            parse_mode="Markdown"
-        )
-    elif text in ["🆘 Помощь", "Помощь"]:
-        await message.answer(
-            "🆘 *Если у вас возник вопрос*\n\n"
-            "Напишите в поддержку:\n"
-            "@ryadom_poisk_support_bot\n\n"
-            "Мы ответим в ближайшее время.",
-            parse_mode="Markdown"
-        )
-    else:
-        pass
+    # Не отвечаем на случайные сообщения, чтобы не мешать
+    pass
 
 # --- Запуск ---
 async def main():

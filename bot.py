@@ -142,8 +142,7 @@ main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚶‍♀️ Создать прогулку")],
         [KeyboardButton(text="📅 Смотреть прогулки")],
-        [KeyboardButton(text="👤 Мои прогулки")],
-        [KeyboardButton(text="Правила"), KeyboardButton(text="Помощь")]
+        [KeyboardButton(text="👤 Мои прогулки")]
     ],
     resize_keyboard=True
 )
@@ -320,7 +319,6 @@ async def show_current_walk(message: types.Message, user_id: int):
         text += f"\n📝 *Описание:* {walk['description']}"
     keyboard_buttons = [
         [InlineKeyboardButton(text="✅ Присоединиться", callback_data=f"join_{walk['id']}")],
-        [InlineKeyboardButton(text="👥 Участники", callback_data=f"members_{walk['id']}")],
         [InlineKeyboardButton(text="⏩ Дальше", callback_data="next_walk")]
     ]
     if current_idx + 1 >= len(walks_list):

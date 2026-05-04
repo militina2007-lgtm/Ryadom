@@ -20,7 +20,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # === Google Sheets подключение ===
-SHEET_ID = "1Q1BQaCoBnMZSPWtM-utnrmVoD0qOsHOO7S4ilhL03D8"  # Замените на ваш ID
+SHEET_ID = "1Q1BQaCoBnMZSPWtM-utnrmVoD0qOsHOO7S4ilhL03D8"
 
 def get_sheet():
     creds_file = "/etc/secrets/credentials.json"
@@ -48,7 +48,7 @@ def load_walks_from_sheet():
         return
     walks = []
     user_walks = {}
-    for row in rows[1:]:  # пропускаем заголовок
+    for row in rows[1:]:
         if not row or not row[0]:
             continue
         walk = {
@@ -62,7 +62,6 @@ def load_walks_from_sheet():
             "members": list(map(int, row[7].split(","))) if row[7] else []
         }
         walks.append(walk)
-        # Заполняем user_walks для быстрого доступа
         for uid in walk["members"]:
             if uid not in user_walks:
                 user_walks[uid] = []
@@ -72,16 +71,13 @@ def load_walks_from_sheet():
 def save_walk_to_sheet(walk):
     if not sheet:
         return
-    # Проверяем, есть ли уже такая прогулка
     rows = sheet.get_all_values()
     for i, row in enumerate(rows[1:], start=2):
         if row and row[0] == str(walk["id"]):
-            # Обновляем существующую
             sheet.update(f"A{i}:H{i}", [[walk["id"], walk["name"], walk["place"], walk["datetime"],
                                          walk["description"], walk["max"], walk["creator"],
                                          ",".join(map(str, walk["members"]))]])
             return
-    # Иначе добавляем новую
     sheet.append_row([walk["id"], walk["name"], walk["place"], walk["datetime"],
                       walk["description"], walk["max"], walk["creator"],
                       ",".join(map(str, walk["members"]))])
@@ -414,7 +410,7 @@ async def join_walk(callback: types.CallbackQuery):
         await callback.answer("❌ Мест больше нет!")
         return
     walk["members"].append(user_id)
-    save_walk_to_sheet(walk)  # Обновляем в таблице
+    save_walk_to_sheet(walk)
     if user_id not in user_walks:
         user_walks[user_id] = []
     if walk_id not in user_walks[user_id]:
@@ -489,6 +485,7 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
+# --- Универсальный обработчик (ЛОВИТ ВСЕ КНОПКИ) ---
 @dp.message()
 async def catch_all(message: types.Message):
     text = message.text
@@ -497,8 +494,8 @@ async def catch_all(message: types.Message):
     elif text in ["🆘 Помощь", "Помощь"]:
         await show_help(message)
     else:
-        await message.answer("Используйте кнопки меню 👇", reply_markup=main_kb)
-
+        # Не отвечаем на случайные сообщения, чтобы не мешать созданию прогулок
+        pass
 
 # --- Запуск ---
 async def main():

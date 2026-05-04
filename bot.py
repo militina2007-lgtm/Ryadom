@@ -490,11 +490,26 @@ async def start_web_server():
 async def catch_all(message: types.Message):
     text = message.text
     if text in ["📖 Правила", "Правила"]:
-        await show_rules(message)
+        await message.answer(
+            "📌 *Правила сообщества «Рядом»*\n\n"
+            "1. Будьте вежливы друг с другом.\n"
+            "2. Не опаздывайте без предупреждения.\n"
+            "3. Если не можете прийти — предупредите организатора.\n"
+            "4. О конфликтах пишите в поддержку: @ryadom_poisk_support_bot\n"
+            "5. Соблюдайте личные границы.\n"
+            "6. Запрещена реклама, алкоголь, наркотики.\n\n"
+            "🌿 Хороших прогулок!",
+            parse_mode="Markdown"
+        )
     elif text in ["🆘 Помощь", "Помощь"]:
-        await show_help(message)
+        await message.answer(
+            "🆘 *Если у вас возник вопрос*\n\n"
+            "Напишите в поддержку:\n"
+            "@ryadom_poisk_support_bot\n\n"
+            "Мы ответим в ближайшее время.",
+            parse_mode="Markdown"
+        )
     else:
-        # Не отвечаем на случайные сообщения, чтобы не мешать созданию прогулок
         pass
 
 # --- Запуск ---

@@ -138,7 +138,7 @@ def clean_expired_walks():
         for uid in user_walks:
             user_walks[uid] = [wid for wid in user_walks[uid] if wid not in expired_ids]
 
-# --- Главное меню (без Правил и Помощи) ---
+# --- Главное меню ---
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚶‍♀️ Создать прогулку")],
@@ -154,7 +154,31 @@ user_temp = {}
 def get_user_mention(user_id):
     return f"[пользователь](tg://user?id={user_id})"
 
-# --- Создание прогулки (с ником создателя) ---
+# --- Команда /start ---
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    clean_expired_walks()
+    await message.answer(
+        "👋 Привет! Я — «Рядом».\n"
+        "Я здесь, чтобы прогулки стали интереснее, а компании находились проще.\n\n"
+        "🚶‍♀️ Создать прогулку — если хочешь позвать других\n"
+        "📅 Смотреть прогулки — если ищешь, куда пойти\n"
+        "👤 Мои прогулки — где ты участвуешь\n\n"
+        "📌 *Правила сообщества:*\n"
+        "1. Будьте вежливы.\n"
+        "2. Не опаздывайте без предупреждения.\n"
+        "3. Удаляйте прогулку, если передумали.\n"
+        "4. О конфликтах пишите в поддержку: @ryadom_poisk_support_bot\n"
+        "5. Соблюдайте личные границы.\n"
+        "6. Запрещена реклама, алкоголь, наркотики.\n\n"
+        "Нажимая «Присоединиться» или создавая прогулку, вы соглашаетесь с правилами.\n\n"
+        "🌿 Хороших прогулок!\n\n"
+        "Давай знакомиться?",
+        reply_markup=main_kb,
+        parse_mode="Markdown"
+    )
+
+# --- Создание прогулки ---
 @dp.message(lambda m: m.text == "🚶‍♀️ Создать прогулку")
 async def create_walk_start(message: types.Message):
     user_temp[message.from_user.id] = {"step": "nick"}
@@ -231,6 +255,36 @@ async def create_walk_collect(message: types.Message):
         )
     elif step == "max_members":
         state["max"] = message.text
+        # Показываем подтверждение
+        confirm_text = (
+            f"🧐 Проверьте прогулку перед публикацией:\n\n"
+            f"📌 Название: {state['name']}\n"
+            f"📍 Место: {state['place']}\n"
+            f"🕓 Когда: {state['datetime']}\n"
+            f"👥 Максимум участников: {state['max'] if state['max'] != '0' else 'безлимит'}\n"
+            f"📝 Описание: {state['description'] if state['description'] else '—'}\n"
+            f"👑 Ваш ник: {state['creator_nick']}\n\n"
+            f"✅ Всё верно?\n"
+            f"✏️ Хочу исправить"
+        )
+        confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, всё верно", callback_data="confirm_yes")],
+            [InlineKeyboardButton(text="✏️ Нет, исправить", callback_data="confirm_edit")]
+        ])
+        state["step"] = "confirm"
+        await message.answer(confirm_text, reply_markup=confirm_kb)
+
+# --- Обработчик подтверждения ---
+@dp.callback_query(lambda c: c.data.startswith("confirm_"))
+async def confirm_walk(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id not in user_temp:
+        await callback.answer("Ошибка! Начните создание заново.")
+        return
+    
+    state = user_temp[user_id]
+    
+    if callback.data == "confirm_yes":
         new_walk = {
             "id": len(walks) + 1 if walks else 1,
             "name": state["name"],
@@ -248,36 +302,19 @@ async def create_walk_collect(message: types.Message):
             user_walks[user_id] = []
         user_walks[user_id].append(new_walk["id"])
         del user_temp[user_id]
-        await message.answer(
-            "✅ Прогулка создана!\n\n"
+        await callback.message.edit_text(
+            "✅ Прогулка опубликована!\n\n"
             "Теперь её увидят другие участники. Не забывайте отвечать в Telegram.\n\n"
-            "➤ Удачных вам встреч! 🌿",
-            reply_markup=main_kb
+            "➤ Удачных вам встреч! 🌿"
         )
-
-# --- Команда /start ---
-@dp.message(Command("start"))
-async def start(message: types.Message):
-    clean_expired_walks()
-    await message.answer(
-        "👋 Привет! Я — «Рядом».\n"
-        "Я здесь, чтобы прогулки стали интереснее, а компании находились проще.\n\n"
-        "🚶‍♀️ Создать прогулку — если хочешь позвать других\n"
-        "📅 Смотреть прогулки — если ищешь, куда пойти\n"
-        "👤 Мои прогулки — где ты участвуешь\n\n"
-        "📌 *Правила сообщества:*\n"
-        "1. Будьте вежливы.\n"
-        "2. Не опаздывайте без предупреждения.\n"
-        "3. Удаляйте прогулку, если передумали.\n"
-        "4. О конфликтах пишите в поддержку: @ryadom_poisk_support_bot\n"
-        "5. Соблюдайте личные границы.\n"
-        "6. Запрещена реклама, алкоголь, наркотики.\n\n"
-        "Нажимая «Присоединиться» или создавая прогулку, вы соглашаетесь с правилами.\n\n"
-        "Давай знакомиться?",
-        reply_markup=main_kb,
-        parse_mode="Markdown"
-    )
-
+    else:  # confirm_edit
+        state["step"] = "nick"
+        await callback.message.edit_text(
+            "✏️ Давайте исправим.\n\n"
+            "➤ Напишите ваш ник в формате @username"
+        )
+    
+    await callback.answer()
 
 # --- Смотреть прогулки ---
 @dp.message(lambda m: m.text == "📅 Смотреть прогулки")
@@ -351,7 +388,7 @@ async def end_walks(callback: types.CallbackQuery):
     await callback.message.edit_text("🏁 Просмотр прогулок завершён.")
     await callback.answer()
 
-# --- Присоединиться (с уведомлением о создателе) ---
+# --- Присоединиться ---
 @dp.callback_query(lambda c: c.data.startswith("join_"))
 async def join_walk(callback: types.CallbackQuery):
     walk_id = int(callback.data.split("_")[1])
@@ -383,7 +420,6 @@ async def join_walk(callback: types.CallbackQuery):
     
     await callback.answer("✅ Вы записаны на прогулку!")
     
-    # Отправляем сообщение с ником создателя
     await callback.message.answer(
         f"✅ Вы участвуете в прогулке «{walk['name']}»!\n\n"
         f"📩 Свяжитесь с создателем: {walk['creator_nick']}\n\n"
@@ -462,10 +498,8 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
-# --- Универсальный обработчик для игнора прочего ---
 @dp.message()
 async def catch_all(message: types.Message):
-    # Не отвечаем на случайные сообщения, чтобы не мешать
     pass
 
 # --- Запуск ---

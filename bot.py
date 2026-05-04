@@ -143,7 +143,7 @@ main_kb = ReplyKeyboardMarkup(
         [KeyboardButton(text="🚶‍♀️ Создать прогулку")],
         [KeyboardButton(text="📅 Смотреть прогулки")],
         [KeyboardButton(text="👤 Мои прогулки")],
-        [KeyboardButton(text="📖 Правила"), KeyboardButton(text="🆘 Помощь")]
+        [KeyboardButton(text="Правила"), KeyboardButton(text="Помощь")]
     ],
     resize_keyboard=True
 )
@@ -155,7 +155,7 @@ def get_user_mention(user_id):
     return f"[пользователь](tg://user?id={user_id})"
 
 # --- Правила ---
-@dp.message(lambda m: m.text == "📖 Правила")
+@dp.message(lambda m: m.text == "Правила")
 async def show_rules(message: types.Message):
     await message.answer(
         "📌 *Правила сообщества «Рядом»*\n\n"
@@ -170,7 +170,7 @@ async def show_rules(message: types.Message):
     )
 
 # --- Помощь ---
-@dp.message(lambda m: m.text == "🆘 Помощь")
+@dp.message(lambda m: m.text == "Помощь")
 async def show_help(message: types.Message):
     await message.answer(
         "🆘 *Если у вас возник вопрос*\n\n"

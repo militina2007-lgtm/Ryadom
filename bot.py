@@ -152,7 +152,7 @@ user_walk_index = {}
 user_temp = {}
 
 def get_user_mention(user_id):
-    return f"[пользователь](tg://user?id={user_id})"
+    return f"tg://user?id={user_id}"
 
 # --- Команда /start ---
 @dp.message(Command("start"))
@@ -164,7 +164,7 @@ async def start(message: types.Message):
         "🚶‍♀️ Создать прогулку — если хочешь позвать других\n"
         "📅 Смотреть прогулки — если ищешь, куда пойти\n"
         "👤 Мои прогулки — где ты участвуешь\n\n"
-        "📌 *Правила сообщества:*\n"
+        "📌 Правила сообщества:\n"
         "1. Будьте вежливы.\n"
         "2. Не опаздывайте без предупреждения.\n"
         "3. Удаляйте прогулку, если передумали.\n"
@@ -174,7 +174,7 @@ async def start(message: types.Message):
         "Нажимая «Присоединиться» или создавая прогулку, вы соглашаетесь с правилами.\n\n"
         "🌿 Хороших прогулок!\n\n"
         "Давай знакомиться?",
-        reply_markup=main_kb,
+        reply_markup=main_kb
     )
 
 # --- Создание прогулки ---
@@ -254,7 +254,6 @@ async def create_walk_collect(message: types.Message):
         )
     elif step == "max_members":
         state["max"] = message.text
-        # Показываем подтверждение
         confirm_text = (
             f"🧐 Проверьте прогулку перед публикацией:\n\n"
             f"📌 Название: {state['name']}\n"
@@ -306,7 +305,7 @@ async def confirm_walk(callback: types.CallbackQuery):
             "Теперь её увидят другие участники. Не забывайте отвечать в Telegram.\n\n"
             "➤ Удачных вам встреч! 🌿"
         )
-    else:  # confirm_edit
+    else:
         state["step"] = "nick"
         await callback.message.edit_text(
             "✏️ Давайте исправим.\n\n"
@@ -348,14 +347,14 @@ async def show_current_walk(message: types.Message, user_id: int):
     if max_members > 0:
         members_text += f" / {max_members}"
     text = (
-        f"📍 *{walk['name']}*\n"
+        f"📍 {walk['name']}\n"
         f"🗓 Когда: {walk['datetime']}\n"
         f"📍 Где: {walk['place']}\n"
         f"👥 Участников: {members_text}"
     )
     if walk.get("description"):
-        text += f"\n📝 *Описание:* {walk['description']}"
-    text += f"\n\n👑 *Создатель:* {walk['creator_nick']}"
+        text += f"\n📝 Описание: {walk['description']}"
+    text += f"\n\n👑 Создатель: {walk['creator_nick']}"
     
     keyboard_buttons = [
         [InlineKeyboardButton(text="✅ Присоединиться", callback_data=f"join_{walk['id']}")],
@@ -364,7 +363,7 @@ async def show_current_walk(message: types.Message, user_id: int):
     if current_idx + 1 >= len(walks_list):
         keyboard_buttons[1] = [InlineKeyboardButton(text="🏁 Завершить", callback_data="end_walks")]
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard)
 
 @dp.callback_query(lambda c: c.data == "next_walk")
 async def next_walk(callback: types.CallbackQuery):
@@ -447,19 +446,19 @@ async def my_walks(message: types.Message):
             members_text += f" / {max_members}"
         creator_text = " (вы создатель)" if walk["creator"] == user_id else ""
         full_text = (
-            f"📍 *{walk['name']}*{creator_text}\n"
+            f"📍 {walk['name']}{creator_text}\n"
             f"🗓 Когда: {walk['datetime']}\n"
             f"📍 Где: {walk['place']}\n"
             f"👥 Участников: {members_text}"
         )
         if walk.get("description"):
-            full_text += f"\n📝 *Описание:* {walk['description']}"
-        full_text += f"\n\n👑 *Создатель:* {walk['creator_nick']}"
+            full_text += f"\n📝 Описание: {walk['description']}"
+        full_text += f"\n\n👑 Создатель: {walk['creator_nick']}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
         if walk["creator"] == user_id:
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_{walk['id']}")])
-        await message.answer(full_text, parse_mode="Markdown", reply_markup=keyboard if keyboard.inline_keyboard else None)
+        await message.answer(full_text, reply_markup=keyboard if keyboard.inline_keyboard else None)
 
 # --- Удалить прогулку ---
 @dp.callback_query(lambda c: c.data.startswith("delete_"))

@@ -429,7 +429,7 @@ async def join_walk(callback: types.CallbackQuery):
         reply_markup=None
     )
 
-# --- Мои прогулки ---
+# --- Мои прогулки (с кнопкой Отменить участие) ---
 @dp.message(lambda m: m.text == "👤 Мои прогулки")
 async def my_walks(message: types.Message):
     clean_expired_walks()
@@ -456,9 +456,50 @@ async def my_walks(message: types.Message):
         full_text += f"\n\n👑 Создатель: {walk['creator_nick']}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        
+        # Кнопка отмены участия (если участник, но не создатель)
+        if user_id in walk["members"] and walk["creator"] != user_id:
+            keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Отменить участие", callback_data=f"cancel_{walk['id']}")])
+        
+        # Кнопка удаления (для создателя)
         if walk["creator"] == user_id:
-            keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_{walk['id']}")])
+            keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Удалить прогулку", callback_data=f"delete_{walk['id']}")])
+        
         await message.answer(full_text, reply_markup=keyboard if keyboard.inline_keyboard else None)
+
+# --- Отменить участие ---
+@dp.callback_query(lambda c: c.data.startswith("cancel_"))
+async def cancel_walk(callback: types.CallbackQuery):
+    walk_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    walk = None
+    for w in walks:
+        if w["id"] == walk_id:
+            walk = w
+            break
+    if not walk:
+        await callback.answer("Прогулка не найдена!")
+        return
+    if user_id not in walk["members"]:
+        await callback.answer("❌ Вы не записаны на эту прогулку!")
+        return
+    if walk["creator"] == user_id:
+        await callback.answer("❌ Вы создатель! Используйте «Удалить».")
+        return
+    
+    # Удаляем пользователя из списка участников
+    walk["members"].remove(user_id)
+    save_walk_to_sheet(walk)
+    
+    # Удаляем из user_walks
+    if user_id in user_walks and walk_id in user_walks[user_id]:
+        user_walks[user_id].remove(walk_id)
+    
+    await callback.answer("✅ Вы отменили участие в прогулке!")
+    await callback.message.edit_text(
+        callback.message.text + "\n\n❌ Вы отменили участие.",
+        reply_markup=None
+    )
 
 # --- Удалить прогулку ---
 @dp.callback_query(lambda c: c.data.startswith("delete_"))
